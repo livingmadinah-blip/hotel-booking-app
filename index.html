@@ -1,122 +1,94 @@
-const SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
-const BOOKINGS_SHEET = "Bookings";
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotel Booking</title>
+<style>
+body { font-family: Arial; padding: 10px; }
+input, select, button { width: 100%; margin: 6px 0; padding: 10px; }
+button { background: #2e7d32; color: white; border: none; }
+.list { margin-top: 20px; }
+.card { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
 
-function doPost(e) {
-  const data = JSON.parse(e.postData.contents);
-  const action = data.action;
+<h2>Hotel Booking</h2>
 
-  if (action === "create") return createBooking(data);
-  if (action === "update") return updateBooking(data);
-  if (action === "delete") return deleteBooking(data);
-  if (action === "list") return listBookings();
+<input id="guest" placeholder="Guest Name">
+<select id="room">
+  <option>301</option><option>302</option><option>303</option>
+  <option>304</option><option>305</option><option>306</option>
+  <option>307</option><option>314</option><option>315</option>
+  <option>316</option>
+</select>
 
-  return output({ status: "error", message: "Invalid action" });
+<input type="date" id="checkin">
+<input type="date" id="checkout">
+<input type="number" id="rate" placeholder="Rate per night">
+
+<button onclick="save()">Save Booking</button>
+
+<div class="list" id="list"></div>
+
+<script>
+const API = "https://script.google.com/macros/s/AKfycbxl2Ehzv5q6zlVI7hIFVSO9-At6XrVVOddsr9alsuM36Ni795Z2yqFgemx5TTjuigdH/exec";
+let editId = null;
+
+function save() {
+  const data = {
+    action: editId ? "update" : "create",
+    id: editId,
+    guest: guest.value,
+    room: room.value,
+    checkin: checkin.value,
+    checkout: checkout.value,
+    rate: rate.value
+  };
+
+  fetch(API, {
+    method: "POST",
+    body: JSON.stringify(data)
+  }).then(r => r.json()).then(res => {
+    alert(res.message || res.status);
+    editId = null;
+    load();
+  });
 }
 
-function doGet() {
-  return ContentService
-    .createTextOutput("Hotel Booking API is running")
-    .setMimeType(ContentService.MimeType.TEXT);
+function load() {
+  fetch(API, {
+    method: "POST",
+    body: JSON.stringify({ action: "list" })
+  }).then(r => r.json()).then(rows => {
+    list.innerHTML = "";
+    rows.forEach(r => {
+      list.innerHTML += `
+        <div class="card">
+          <b>${r[1]}</b> – Room ${r[2]}<br>
+          ${r[3]} → ${r[4]}<br>
+          <button onclick="edit('${r[0]}')">Edit</button>
+          <button onclick="del('${r[0]}')">Delete</button>
+        </div>`;
+    });
+  });
 }
 
-function getSheet() {
-  return SpreadsheetApp.openById(SHEET_ID).getSheetByName(BOOKINGS_SHEET);
+function edit(id) {
+  editId = id;
+  alert("Edit loaded – update fields and save");
 }
 
-function createBooking(data) {
-  if (isOverlapping(data)) {
-    return output({ status: "error", message: "Room already booked" });
-  }
-
-  const sheet = getSheet();
-  const id = Utilities.getUuid();
-  const nights = dateDiff(data.checkin, data.checkout);
-  const total = nights * data.rate;
-
-  sheet.appendRow([
-    id,
-    data.guest,
-    data.room,
-    new Date(data.checkin),
-    new Date(data.checkout),
-    nights,
-    data.rate,
-    total,
-    new Date()
-  ]);
-
-  return output({ status: "success", id: id });
+function del(id) {
+  if (!confirm("Delete booking?")) return;
+  fetch(API, {
+    method: "POST",
+    body: JSON.stringify({ action: "delete", id })
+  }).then(() => load());
 }
 
-function updateBooking(data) {
-  const sheet = getSheet();
-  const rows = sheet.getDataRange().getValues();
+load();
+</script>
 
-  if (isOverlapping(data, data.id)) {
-    return output({ status: "error", message: "Room already booked" });
-  }
-
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === data.id) {
-      const nights = dateDiff(data.checkin, data.checkout);
-      const total = nights * data.rate;
-
-      sheet.getRange(i + 1, 2, 1, 8).setValues([[
-        data.guest,
-        data.room,
-        new Date(data.checkin),
-        new Date(data.checkout),
-        nights,
-        data.rate,
-        total,
-        new Date()
-      ]]);
-
-      return output({ status: "updated" });
-    }
-  }
-}
-
-function deleteBooking(data) {
-  const sheet = getSheet();
-  const rows = sheet.getDataRange().getValues();
-
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === data.id) {
-      sheet.deleteRow(i + 1);
-      return output({ status: "deleted" });
-    }
-  }
-}
-
-function listBookings() {
-  const sheet = getSheet();
-  const rows = sheet.getDataRange().getValues();
-  rows.shift();
-  return output(rows);
-}
-
-function isOverlapping(data, ignoreId) {
-  const rows = getSheet().getDataRange().getValues();
-
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][2] == data.room && rows[i][0] !== ignoreId) {
-      const ci = new Date(rows[i][3]);
-      const co = new Date(rows[i][4]);
-
-      if (new Date(data.checkin) < co && new Date(data.checkout) > ci) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function dateDiff(d1, d2) {
-  return Math.round((new Date(d2) - new Date(d1)) / (1000 * 60 * 60 * 24));
-}
-
-function output(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+</body>
+</html>
