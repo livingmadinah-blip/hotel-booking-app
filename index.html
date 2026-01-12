@@ -1,0 +1,122 @@
+const SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const BOOKINGS_SHEET = "Bookings";
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const action = data.action;
+
+  if (action === "create") return createBooking(data);
+  if (action === "update") return updateBooking(data);
+  if (action === "delete") return deleteBooking(data);
+  if (action === "list") return listBookings();
+
+  return output({ status: "error", message: "Invalid action" });
+}
+
+function doGet() {
+  return ContentService
+    .createTextOutput("Hotel Booking API is running")
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
+function getSheet() {
+  return SpreadsheetApp.openById(SHEET_ID).getSheetByName(BOOKINGS_SHEET);
+}
+
+function createBooking(data) {
+  if (isOverlapping(data)) {
+    return output({ status: "error", message: "Room already booked" });
+  }
+
+  const sheet = getSheet();
+  const id = Utilities.getUuid();
+  const nights = dateDiff(data.checkin, data.checkout);
+  const total = nights * data.rate;
+
+  sheet.appendRow([
+    id,
+    data.guest,
+    data.room,
+    new Date(data.checkin),
+    new Date(data.checkout),
+    nights,
+    data.rate,
+    total,
+    new Date()
+  ]);
+
+  return output({ status: "success", id: id });
+}
+
+function updateBooking(data) {
+  const sheet = getSheet();
+  const rows = sheet.getDataRange().getValues();
+
+  if (isOverlapping(data, data.id)) {
+    return output({ status: "error", message: "Room already booked" });
+  }
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.id) {
+      const nights = dateDiff(data.checkin, data.checkout);
+      const total = nights * data.rate;
+
+      sheet.getRange(i + 1, 2, 1, 8).setValues([[
+        data.guest,
+        data.room,
+        new Date(data.checkin),
+        new Date(data.checkout),
+        nights,
+        data.rate,
+        total,
+        new Date()
+      ]]);
+
+      return output({ status: "updated" });
+    }
+  }
+}
+
+function deleteBooking(data) {
+  const sheet = getSheet();
+  const rows = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.id) {
+      sheet.deleteRow(i + 1);
+      return output({ status: "deleted" });
+    }
+  }
+}
+
+function listBookings() {
+  const sheet = getSheet();
+  const rows = sheet.getDataRange().getValues();
+  rows.shift();
+  return output(rows);
+}
+
+function isOverlapping(data, ignoreId) {
+  const rows = getSheet().getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][2] == data.room && rows[i][0] !== ignoreId) {
+      const ci = new Date(rows[i][3]);
+      const co = new Date(rows[i][4]);
+
+      if (new Date(data.checkin) < co && new Date(data.checkout) > ci) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function dateDiff(d1, d2) {
+  return Math.round((new Date(d2) - new Date(d1)) / (1000 * 60 * 60 * 24));
+}
+
+function output(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
